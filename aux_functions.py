@@ -10,7 +10,8 @@ import numpy as np
 
 # Initialize random user and base station locations within given limits
 # And other parameters
-def init_scenario(num_users, xlim, ylim, noise_power, p_valid, eta):
+def init_scenario(num_users, xlim, ylim, epsilon_distance, noise_power,
+                  p_valid, eta, eta_penalty):
     # Place the base station near (or in) the center
     bs_location = np.asarray([np.random.randint(low=np.max(xlim)//2-2, high=np.max(xlim)//2+2, size=(1,)),
                               np.random.randint(low=np.max(ylim)//2-2, high=np.max(ylim)//2+2, size=(1,))]).T
@@ -24,13 +25,15 @@ def init_scenario(num_users, xlim, ylim, noise_power, p_valid, eta):
     # Create and return scenario dictionary
     scenario = {'xlim': xlim,
                 'ylim': ylim,
+                'epsilon_distance': epsilon_distance,
                 'num_users': num_users,
                 'bs_location': bs_location,
                 'user_locations': user_locations,
                 'user_powers': user_powers,
                 'noise_power': noise_power,
                 'p_valid': p_valid,
-                'eta': eta}
+                'eta': eta,
+                'eta_penalty': eta_penalty}
     return scenario
     
 # Move all users in a random direction (diagonal included)
@@ -71,11 +74,17 @@ def update_sinr(scenario):
     # Distances to base station
     user_bs_dist = np.sqrt(np.sum(np.square(scenario['user_locations'] - scenario[
             'bs_location']), axis=-1))
+    # Replace zero distances with epsilon stabilizer
+    user_bs_dist[user_bs_dist == 0] = scenario['epsilon_distance']
+    
     # Pairwise distance matrix between all users
     # Use expansion trick for efficient computation
     user_pair_dist = np.sqrt(np.sum(np.square(scenario['user_locations'] - scenario['user_locations'][:, None, :]), axis=-1))
     # Replace diagonals with inf, since we care about 1/dist
     np.fill_diagonal(user_pair_dist, np.inf)
+    
+    # Replace all other zero distances with an epsilon stabilizer
+    user_pair_dist[user_pair_dist == 0] = scenario['epsilon_distance']
     
     # User signal power
     user_signal = scenario['user_powers'] * np.square(1/user_bs_dist)
@@ -98,3 +107,12 @@ def user_power_adjust(scenario, user_update_idx):
     # Write and return
     scenario['user_powers'][user_update_idx] = new_power
     return scenario
+
+# Capacity reward with a negative penalty when QoS is violated
+def capacity_reward(scenario):
+    # Compute individual capacity
+    capacity = np.log2(1 + scenario['user_sinr'])
+    # Overwrite values where QoS requirement is not met
+    capacity[scenario['user_sinr'] < scenario['eta']] = scenario['eta_penalty']
+    
+    return capacity
